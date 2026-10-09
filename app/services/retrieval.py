@@ -24,7 +24,9 @@ from app.models import Document
 from app.services import vector_store
 
 MODES = ("hybrid", "vector", "keyword")
-_TOKEN = re.compile(r"\w+", re.UNICODE)
+# \w alone splits Devanagari words at vowel signs (भुगतान -> भ, गत, न), so the
+# Devanagari block is added explicitly, minus the danda punctuation (। ॥).
+_TOKEN = re.compile(r"[\wऀ-ॣ०-ॿ]+")
 # Question words that carry no content (English + common Hinglish).
 STOPWORDS = frozenset(
     "a an and are as at be by can do does for from how i if in is it its me my of on or should "

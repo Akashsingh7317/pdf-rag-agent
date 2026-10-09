@@ -1,7 +1,12 @@
 """Entry point.
 
 Local dev:   python wsgi.py
-Production:  gunicorn -w 2 -k gthread --threads 8 -b 0.0.0.0:8000 wsgi:app
+Production:  docker compose up (see docker-compose.yml)
+
+Several Gunicorn workers need INGESTION_BACKEND=celery, CHROMA_HOST (the
+embedded Chroma store is single-process) and a Redis RATE_LIMIT_STORAGE_URI.
+With the local defaults, run a single worker:
+             gunicorn -w 1 -k gthread --threads 8 -b 0.0.0.0:8000 wsgi:app
 """
 
 import os

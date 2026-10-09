@@ -291,6 +291,7 @@ function docStatusText(doc) {
       ? `${plural(doc.page_count, "page")} · ${formatBytes(doc.size_bytes)}`
       : `${KIND_LABELS[doc.kind]} · ${formatBytes(doc.size_bytes)}`;
   }
+  if (doc.stuck) return "Stuck";
   if (doc.status === "queued") return "Queued…";
   if (doc.status === "processing") return `Reading ${doc.progress}%`;
   return "Failed";
@@ -308,8 +309,8 @@ function renderSidebar() {
       ? `<img class="doc-thumb" src="/api/documents/${doc.id}/file" alt="" loading="lazy">`
       : KIND_BADGES[doc.kind] || "PDF";
     const bar = isInProgress(doc) ? `<span class="mini-bar"><span style="width:${doc.progress}%"></span></span>` : "";
-    const warn = doc.status === "failed" || doc.needs_reindex ? " warn" : "";
-    const del = isInProgress(doc) ? "" :
+    const warn = doc.status === "failed" || doc.needs_reindex || doc.stuck ? " warn" : "";
+    const del = isInProgress(doc) && !doc.stuck ? "" :
       `<button class="doc-delete" type="button" data-delete="${doc.id}" aria-label="Delete ${escapeHtml(doc.filename)}">${ICONS.trash}</button>`;
     return `
       <li class="doc-item${active}" data-id="${doc.id}" tabindex="0" role="button" aria-current="${active ? "true" : "false"}">
@@ -391,7 +392,7 @@ function renderMain(force = false) {
 
   let view = "welcome";
   if (state.activeId === ALL) view = `all:${scopeReady()}`;
-  else if (doc) view = `${doc.id}:${doc.status}:${doc.needs_reindex}`;
+  else if (doc) view = `${doc.id}:${doc.status}:${doc.needs_reindex}:${doc.stuck}`;
 
   if (!force && view === state.renderedView) {
     if (doc && isInProgress(doc)) updateProgress(doc);
@@ -406,6 +407,7 @@ function renderMain(force = false) {
   else if (doc.needs_reindex) renderNeedsReindex(doc);
   else if (doc.status === "ready") renderDocumentChat(doc);
   else if (doc.status === "failed") renderFailed(doc);
+  else if (doc.stuck) renderStuck(doc);
   else renderProcessing(doc);
 }
 
@@ -458,6 +460,20 @@ function renderFailed(doc) {
           <button class="btn btn-primary" type="button" data-action="reprocess">Retry</button>
           <button class="btn btn-danger" type="button" data-action="delete">Delete</button>
           <button class="btn btn-ghost" type="button" data-action="upload">Add another file</button>
+        </div>
+      </div>
+    </section>`;
+}
+
+function renderStuck(doc) {
+  els.content.innerHTML = `
+    <section class="panel">
+      <div class="status-card failed">
+        <h2>Processing seems stuck</h2>
+        <p><strong>${escapeHtml(doc.filename)}</strong> hasn't made progress for a long time (stopped at ${doc.progress}%). The background job may have been interrupted. Retry it, or delete it.</p>
+        <div class="actions">
+          <button class="btn btn-primary" type="button" data-action="reprocess">Retry</button>
+          <button class="btn btn-danger" type="button" data-action="delete">Delete</button>
         </div>
       </div>
     </section>`;

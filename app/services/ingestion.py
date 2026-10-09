@@ -152,19 +152,24 @@ def _read_pdf(path: str, report: Report) -> Extraction:
 
     ocr_pages = 0
     if scanned and config["OCR_ENABLED"]:
-        to_read = scanned[: config["OCR_MAX_PAGES"]]
-        _ocr_pages(path, to_read, texts, report)
-        ocr_pages = len(to_read)
+        ocr_pages = _ocr_pages(path, scanned, texts, report)
 
     pages = [Chunk(page_content=texts[n], metadata={"page": n}) for n in sorted(texts)]
     return Extraction(pages, total, ocr_pages)
 
 
-def _ocr_pages(path: str, numbers: list[int], texts: dict[int, str], report: Report) -> None:
-    """Read pages without a text layer with the vision model. A page that
-    fails is skipped; if nothing at all could be read, the error is raised so
-    the user sees why (e.g. a rate limit)."""
-    first_error = None
+def _ocr_pages(path: str, scanned: list[int], texts: dict[int, str], report: Report) -> int:
+    """Read pages without a text layer with the vision model, up to
+    OCR_MAX_PAGES; returns how many were sent. A page that fails is skipped;
+    if every page fails, the error is raised so the user sees why (e.g. a rate
+    limit) instead of a "ready" file missing its scanned pages."""
+    numbers = scanned[: current_app.config["OCR_MAX_PAGES"]]
+    if len(numbers) < len(scanned):
+        logger.warning(
+            "%s: %d scanned pages, only the first %d are read (OCR_MAX_PAGES)",
+            path, len(scanned), len(numbers),
+        )
+    first_error, failures = None, 0
     pdf = pdfium.PdfDocument(path)
     try:
         for i, number in enumerate(numbers, start=1):
@@ -180,12 +185,14 @@ def _ocr_pages(path: str, numbers: list[int], texts: dict[int, str], report: Rep
             except Exception as exc:  # noqa: BLE001
                 logger.warning("OCR failed for page %d of %s: %s", number, path, exc)
                 first_error = first_error or exc
+                failures += 1
             finally:
                 page.close()
     finally:
         pdf.close()
-    if first_error is not None and not texts:
+    if first_error is not None and failures == len(numbers):
         raise first_error
+    return len(numbers)
 
 
 def split_pages(pages: list[Chunk], chunk_size: int, chunk_overlap: int) -> list[Chunk]:

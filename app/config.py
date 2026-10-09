@@ -34,6 +34,9 @@ class Config:
     JWT_COOKIE_CSRF_PROTECT = True                # cookie logins must send X-CSRF-TOKEN
     JWT_SESSION_COOKIE = False                    # keep the login after the browser closes
     PASSWORD_MIN_LENGTH = 8
+    PASSWORD_MAX_LENGTH = 1024  # hashing very long passwords is a cheap way to burn CPU
+    # Uploads and recordings have their own limits; any other request is small JSON.
+    MAX_JSON_BYTES = 64 * 1024
 
     # --- Database -----------------------------------------------------------
     # SQLite needs zero setup for local dev. In Docker/production point this
@@ -99,12 +102,18 @@ class Config:
     # "sync":   run inline in the request (tests only)
     INGESTION_BACKEND = os.environ.get("INGESTION_BACKEND", "thread")
     INGESTION_THREADS = _int("INGESTION_THREADS", 2)
+    # A job that saved no progress for this long is treated as stuck: the user
+    # may then retry or delete it (progress is saved at least every few minutes).
+    STALE_JOB_MINUTES = _int("STALE_JOB_MINUTES", 30)
     CELERY = {
         "broker_url": REDIS_URL,
         "task_ignore_result": True,
         "task_acks_late": True,              # re-deliver if a worker dies mid-ingest
         "task_reject_on_worker_lost": True,
         "worker_prefetch_multiplier": 1,     # one big PDF per worker process at a time
+        # The soft limit raises inside the task, so the document is marked failed;
+        # the hard limit kills the process and would leave it "processing".
+        "task_soft_time_limit": 55 * 60,
         "task_time_limit": 60 * 60,
     }
 

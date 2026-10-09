@@ -6,6 +6,7 @@ import hashlib
 import logging
 import os
 import uuid
+from datetime import timedelta
 
 from flask import current_app, jsonify, request, send_file, url_for
 from flask_jwt_extended import current_user
@@ -33,8 +34,12 @@ def get_document_or_404(doc_id: str) -> Document:
     return doc
 
 
+def _stale_after() -> timedelta:
+    return timedelta(minutes=current_app.config["STALE_JOB_MINUTES"])
+
+
 def document_json(doc: Document) -> dict:
-    return doc.to_dict(current_embedding_model=llm.embedding_model_name())
+    return doc.to_dict(current_embedding_model=llm.embedding_model_name(), stale_after=_stale_after())
 
 
 def _save_and_hash(file_storage, dest_path: str, kind: str) -> tuple[str, int]:
@@ -176,11 +181,14 @@ def get_document_file(doc_id: str):
 @limiter.limit(lambda: current_app.config["UPLOAD_RATE_LIMIT"])
 def retry_document(doc_id: str):
     """Process a document again from the file already on disk: after a
-    failure (e.g. a fixed API key) or when the embedding model changed."""
+    failure (e.g. a fixed API key), when the embedding model changed, or when
+    its job is stuck."""
     doc = get_document_or_404(doc_id)
-    if not (doc.status == DocumentStatus.FAILED or document_json(doc)["needs_reindex"]):
+    info = document_json(doc)
+    if not (doc.status == DocumentStatus.FAILED or info["needs_reindex"] or info["stuck"]):
         raise ApiError(
-            "Only failed documents, or ones indexed with a different AI model, can be processed again.",
+            "Only failed or stuck documents, or ones indexed with a different AI model, "
+            "can be processed again.",
             409,
         )
     if not os.path.exists(doc.file_path):
@@ -210,7 +218,7 @@ def create_summary(doc_id: str):
 @api.delete("/documents/<doc_id>")
 def delete_document(doc_id: str):
     doc = get_document_or_404(doc_id)
-    if doc.status in DocumentStatus.IN_PROGRESS:
+    if doc.status in DocumentStatus.IN_PROGRESS and not doc.is_stuck(_stale_after()):
         raise ApiError("This document is still being processed. Delete it once it finishes.", 409)
 
     vector_store.delete_document(doc.id)

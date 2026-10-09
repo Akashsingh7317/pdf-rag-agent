@@ -51,7 +51,7 @@ Runs **free** with Groq and a local embedding model, or on OpenAI by changing tw
 - **Pluggable AI providers:** Groq or OpenAI for chat, vision and speech; OpenAI or a local CPU
   model (all-MiniLM-L6-v2 via ONNX) for embeddings. Switching the embedding model marks files
   "Needs re-index" instead of silently returning wrong results.
-- **78 offline tests** that run the whole pipeline with fake models: no API key, no cost.
+- **92 offline tests** that run the whole pipeline with fake models: no API key, no cost.
 
 ## Architecture
 
@@ -220,6 +220,7 @@ All settings are environment variables; [.env.example](.env.example) lists every
 | `CHROMA_HOST` / `CHROMA_PORT` | empty / `8000` | Use a Chroma server instead of the embedded one |
 | `RATE_LIMIT_STORAGE_URI` | `memory://` | Redis shares limits across workers |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1200` / `200` | Use 1000 with local embeddings |
+| `STALE_JOB_MINUTES` | `30` | A file with no progress for this long is shown as stuck and can be retried or deleted |
 
 ## Design decisions
 
@@ -242,7 +243,7 @@ All settings are environment variables; [.env.example](.env.example) lists every
 ## Testing
 
 ```bash
-pytest -q                       # 78 tests, offline, no API key
+pytest -q                       # 92 tests, offline, no API key
 python -m evals.run_eval        # retrieval quality (offline with local embeddings)
 ```
 
@@ -250,7 +251,8 @@ The tests build real PDFs, Word files and images on the fly and cover: sign-up/l
 CSRF and Bearer auth, per-user isolation, first-account data claiming, the legacy database and
 vector migration, uploads and validation for every file type, OCR of scanned pages, summaries,
 hybrid retrieval (including exact-code ranking), re-indexing after a model change, streaming
-chat for one and all documents, follow-up rewriting, voice transcription, and error handling.
+chat for one and all documents, follow-up rewriting, voice transcription, stuck-job recovery,
+request size limits, Devanagari keyword search, security headers, and error handling.
 
 ## Project structure
 

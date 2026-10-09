@@ -5,6 +5,8 @@ import logging
 from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
+from app.services.llm import LLMConfigError
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,8 +24,16 @@ def register_error_handlers(app: Flask) -> None:
 
     @app.errorhandler(RequestEntityTooLarge)
     def handle_too_large(exc):
-        limit_mb = app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024)
-        return jsonify(error=f"File is too large. The limit is {limit_mb} MB."), 413
+        limit = request.max_content_length or app.config["MAX_CONTENT_LENGTH"]
+        if limit < 1024 * 1024:
+            return jsonify(error="Request is too large."), 413
+        return jsonify(error=f"File is too large. The limit is {limit // (1024 * 1024)} MB."), 413
+
+    @app.errorhandler(LLMConfigError)
+    def handle_llm_config_error(exc: LLMConfigError):
+        # e.g. an unknown EMBEDDING_PROVIDER: say what to fix instead of a bare 500.
+        logger.error("AI provider configuration: %s", exc)
+        return jsonify(error=str(exc)), 500
 
     @app.errorhandler(HTTPException)
     def handle_http_error(exc: HTTPException):

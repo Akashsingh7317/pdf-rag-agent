@@ -12,6 +12,7 @@ from flask_jwt_extended import (
     verify_jwt_in_request,
 )
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.api import api
@@ -23,6 +24,7 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 # Checked when the email is unknown, so a wrong email takes as long as a wrong
 # password and response times don't reveal which emails have accounts.
 _DUMMY_HASH = generate_password_hash("not-a-real-password")
+LOGIN_FAILED = "Incorrect email or password."
 
 
 def _auth_limit() -> str:
@@ -86,29 +88,43 @@ def register():
     min_length = current_app.config["PASSWORD_MIN_LENGTH"]
     if len(form["password"]) < min_length:
         raise ApiError(f"Password must be at least {min_length} characters.")
+    max_length = current_app.config["PASSWORD_MAX_LENGTH"]
+    if len(form["password"]) > max_length:
+        raise ApiError(f"Password must be at most {max_length} characters.")
     if db.session.scalar(select(User).filter_by(email=form["email"])):
-        raise ApiError("An account with this email already exists. Log in instead.", 409)
+        raise _email_taken()
 
     first_user = _user_count() == 0
     user = User(email=form["email"], name=form["name"] or form["email"].split("@")[0])
     user.set_password(form["password"])
     db.session.add(user)
-    db.session.flush()
+    try:
+        db.session.flush()
+    except IntegrityError:
+        # The same email was registered concurrently and the other request won.
+        db.session.rollback()
+        raise _email_taken() from None
     claimed = _claim_unowned_data(user) if first_user else 0
     db.session.commit()
     return _session_response(user, 201, claimed_documents=claimed)
+
+
+def _email_taken() -> ApiError:
+    return ApiError("An account with this email already exists. Log in instead.", 409)
 
 
 @api.post("/auth/login")
 @limiter.limit(_auth_limit)
 def login():
     form = _form()
+    if len(form["password"]) > current_app.config["PASSWORD_MAX_LENGTH"]:
+        raise ApiError(LOGIN_FAILED, 401)  # no account can have it
     user = db.session.scalar(select(User).filter_by(email=form["email"]))
     if user is None:
         check_password_hash(_DUMMY_HASH, form["password"])
-        raise ApiError("Incorrect email or password.", 401)
+        raise ApiError(LOGIN_FAILED, 401)
     if not user.check_password(form["password"]):
-        raise ApiError("Incorrect email or password.", 401)
+        raise ApiError(LOGIN_FAILED, 401)
     return _session_response(user)
 
 

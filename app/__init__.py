@@ -17,6 +17,14 @@ from app.tasks import init_celery, init_thread_pool
 
 logger = logging.getLogger(__name__)
 
+# The UI is one page with its own scripts and styles: no inline scripts, no
+# third-party origins. Inline styles are allowed for progress-bar widths.
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; "
+    "base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+)
+
 
 def create_app(overrides: dict | None = None) -> Flask:
     app = Flask(__name__)
@@ -43,6 +51,15 @@ def create_app(overrides: dict | None = None) -> Flask:
     def index():
         max_mb = app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024)
         return render_template("index.html", max_upload_mb=max_mb)
+
+    @app.after_request
+    def security_headers(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        # Only on HTML pages: a CSP on an inline PDF can stop the browser's PDF viewer.
+        if response.mimetype == "text/html":
+            response.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+        return response
 
     with app.app_context():
         if app.config["AUTO_MIGRATE"]:

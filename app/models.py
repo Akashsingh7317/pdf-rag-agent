@@ -1,7 +1,7 @@
 """Database models: users, their documents, and chat history."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -104,7 +104,19 @@ class Document(db.Model):
         """Changes whenever the document is re-indexed (used as a cache key)."""
         return f"{self.embedding_model}:{self.chunk_count}:{_iso(self.updated_at)}"
 
-    def to_dict(self, current_embedding_model: str | None = None) -> dict:
+    def is_stuck(self, stale_after: timedelta) -> bool:
+        """In progress, but no progress was saved for `stale_after`: the job
+        died (e.g. a killed worker), so the user may retry or delete it."""
+        if self.status not in DocumentStatus.IN_PROGRESS or self.updated_at is None:
+            return False
+        updated = self.updated_at
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
+        return _now() - updated > stale_after
+
+    def to_dict(
+        self, current_embedding_model: str | None = None, stale_after: timedelta | None = None
+    ) -> dict:
         return {
             "id": self.id,
             "filename": self.filename,
@@ -123,6 +135,7 @@ class Document(db.Model):
                 and self.status == DocumentStatus.READY
                 and self.embedding_model != current_embedding_model
             ),
+            "stuck": bool(stale_after and self.is_stuck(stale_after)),
             "created_at": _iso(self.created_at),
             "updated_at": _iso(self.updated_at),
         }
