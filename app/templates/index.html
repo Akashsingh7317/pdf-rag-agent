@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PDF RAG Agent</title>
+  <meta name="description" content="Chat with your PDFs, Word files, text files and photos. Answers come from your files, with page citations.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M10 8h8l5 5v11a1 1 0 0 1-1 1H10a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<!-- Sign in / sign up -->
+<div class="auth" id="auth" hidden>
+  <div class="auth-card">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">PDF RAG Agent</div>
+        <div class="brand-sub">Chat with your documents</div>
+      </div>
+    </div>
+    <h1 id="auth-title">Welcome back</h1>
+    <p class="auth-sub" id="auth-sub">Log in to chat with your documents.</p>
+    <div class="auth-tabs" role="tablist" aria-label="Account">
+      <button type="button" role="tab" id="tab-login" aria-selected="true">Log in</button>
+      <button type="button" role="tab" id="tab-register" aria-selected="false">Create account</button>
+    </div>
+    <form id="auth-form" novalidate>
+      <label class="field" id="name-field" hidden>
+        <span>Your name</span>
+        <input id="auth-name" autocomplete="name" maxlength="100" placeholder="Asha Verma">
+      </label>
+      <label class="field">
+        <span>Email</span>
+        <input id="auth-email" type="email" autocomplete="email" placeholder="you@example.com" required>
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input id="auth-password" type="password" autocomplete="current-password" minlength="8" required>
+        <small id="password-hint" hidden>At least 8 characters.</small>
+      </label>
+      <p class="auth-note" id="auth-note" hidden></p>
+      <p class="auth-error" id="auth-error" role="alert" hidden></p>
+      <button class="btn btn-primary btn-block" id="auth-submit" type="submit">Log in</button>
+    </form>
+  </div>
+</div>
+
+<!-- The app -->
+<div class="app" id="app" hidden>
+  <div class="backdrop" id="backdrop"></div>
+
+  <aside class="sidebar" id="sidebar" aria-label="Documents">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">PDF RAG Agent</div>
+        <div class="brand-sub">Chat with your documents</div>
+      </div>
+    </div>
+
+    <label class="dropzone" id="dropzone" tabindex="0" role="button" data-max-mb="{{ max_upload_mb }}">
+      <input type="file" id="file-input" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp,text/plain,text/markdown,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+      <svg class="dropzone-icon" viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+      <span class="dropzone-title">Drop a file or <u>browse</u></span>
+      <span class="dropzone-hint">PDF, Word, TXT or photo · up to {{ max_upload_mb }} MB</span>
+      <span class="upload-bar" id="upload-bar" hidden><span id="upload-bar-fill"></span></span>
+    </label>
+
+    <button class="scope-item" id="all-docs" type="button">
+      <span class="scope-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 3 8l9 5 9-5-9-5z"/><path d="m3 13 9 5 9-5"/></svg>
+      </span>
+      <span class="doc-body">
+        <span class="doc-name">All documents</span>
+        <span class="doc-sub" id="all-docs-sub">Ask across every file</span>
+      </span>
+    </button>
+
+    <div class="section-label">Documents</div>
+    <ul class="doc-list" id="doc-list"></ul>
+    <p class="doc-empty" id="doc-empty">No documents yet. Add one to get started.</p>
+
+    <div class="user-bar">
+      <span class="avatar" id="user-avatar" aria-hidden="true"></span>
+      <span class="user-text">
+        <span class="user-name" id="user-name"></span>
+        <span class="user-email" id="user-email"></span>
+      </span>
+      <button class="icon-btn" id="logout-btn" type="button" title="Log out" aria-label="Log out">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" id="menu-btn" aria-label="Show documents">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <div class="topbar-text">
+        <h1 id="doc-title">Welcome</h1>
+        <p id="doc-meta">Add a document or photo to start asking questions</p>
+      </div>
+      <button class="btn btn-ghost" id="clear-chat" hidden>Clear chat</button>
+    </header>
+
+    <div class="content" id="content">
+      <!-- Filled by app.js: welcome screen, processing status, or chat messages -->
+    </div>
+
+    <div class="composer-wrap" id="composer-wrap">
+      <form class="composer" id="composer">
+        <button class="attach-btn" id="attach-btn" type="button" aria-label="Add a document or photo" title="Add a document or photo (PDF, Word, TXT, image)">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <textarea id="question" rows="1" maxlength="2000" placeholder="Ask a question about this document…" aria-label="Your question"></textarea>
+        <div class="recording" id="recording" hidden>
+          <span class="rec-dot" aria-hidden="true"></span>
+          <span class="rec-time" id="rec-time">0:00</span>
+          <span class="rec-text">Listening… click the mic to finish, Esc to cancel</span>
+        </div>
+        <button class="mic-btn" id="mic-btn" type="button" aria-label="Ask with your voice" title="Ask with your voice">
+          <svg class="icon-mic" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+          <svg class="icon-stop" viewBox="0 0 24 24" width="16" height="16"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>
+          <span class="spinner" aria-hidden="true"></span>
+        </button>
+        <button class="btn btn-primary send-btn" id="send-btn" type="submit" aria-label="Send">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+      </form>
+      <p class="composer-hint" id="composer-hint">Answers use only your files and cite pages. + adds a file, the mic lets you ask by voice.</p>
+    </div>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

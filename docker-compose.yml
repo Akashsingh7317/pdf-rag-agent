@@ -1,0 +1,96 @@
+# Full production-style stack:
+#   web     Flask API + UI served by Gunicorn        -> http://localhost:8000
+#   worker  Celery worker that reads, OCRs, embeds and summarises files
+#   mysql   users, documents + chat history
+#   redis   Celery broker + shared rate-limit storage
+#   chroma  vector database server (shared by web and worker)
+#
+# Usage:  cp .env.example .env   (add GROQ_API_KEY and a SECRET_KEY)
+#         docker compose up --build
+
+x-app-env: &app-env
+  DATABASE_URL: mysql+pymysql://rag:${MYSQL_PASSWORD:-rag_password}@mysql:3306/pdf_rag
+  REDIS_URL: redis://redis:6379/0
+  RATE_LIMIT_STORAGE_URI: redis://redis:6379/1
+  CHROMA_HOST: chroma
+  CHROMA_PORT: "8000"
+  INGESTION_BACKEND: celery
+  UPLOAD_DIR: /app/data/uploads
+  # Several processes share one database: migrate once, in the web command below.
+  AUTO_MIGRATE: "false"
+  # Every container must sign and verify logins with the same key.
+  SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env (see .env.example)}
+
+services:
+  web:
+    build: .
+    command: sh -c "flask --app wsgi db upgrade && exec gunicorn wsgi:app --bind 0.0.0.0:8000 --workers 2 --worker-class gthread --threads 8 --timeout 120 --access-logfile -"
+    env_file: .env
+    environment: *app-env
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads:/app/data/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: celery -A celery_worker.celery_app worker --loglevel=info --concurrency=2
+    env_file: .env
+    environment: *app-env
+    volumes:
+      - uploads:/app/data/uploads
+    depends_on:
+      web:
+        condition: service_healthy  # web creates the database tables on start-up
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: pdf_rag
+      MYSQL_USER: rag
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-rag_password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      # 127.0.0.1 (TCP), not localhost: during first-run init MySQL listens on the socket only
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  chroma:
+    image: chromadb/chroma:1.5.9  # keep in sync with chromadb in requirements.txt
+    volumes:
+      - chroma-data:/data
+    restart: unless-stopped
+
+volumes:
+  uploads:
+  mysql-data:
+  chroma-data:
